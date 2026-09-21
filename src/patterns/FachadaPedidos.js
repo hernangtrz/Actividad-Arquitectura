@@ -25,7 +25,16 @@ export class FachadaPedidos {
   }
 
   async procesarPedido(pedido) {
-    // TODO(Ejercicio 2): implementar la orquestación descrita arriba
-    throw new Error('FachadaPedidos.procesarPedido() no implementado todavía')
+    await inventario.reservar(pedido.items)
+
+    const pago = await this.pago.procesar(pedido.total)
+    if (!pago.exito) {
+      throw new Error('El pago fue rechazado. No se pudo completar el pedido.')
+    }
+
+    const envio = await envios.programar(pedido.direccion)
+    await notificaciones.confirmar(pedido.cliente)
+
+    return { pago, envio, completado: true }
   }
 }

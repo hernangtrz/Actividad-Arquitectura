@@ -22,7 +22,65 @@
  * que hace que Vista y lógica queden desacopladas (a diferencia de
  * OrdersApp.jsx, donde estaban mezcladas).
  */
+import { useState } from 'react'
+import { FachadaPedidos } from '../patterns/FachadaPedidos.js'
+import { AdapterPasarelaX } from '../services/pagos/AdapterPasarelaX.js'
+import { AdapterPasarelaY } from '../services/pagos/AdapterPasarelaY.js'
+
+const FORM_INICIAL = {
+  cliente: '',
+  direccion: '',
+  itemsText: '',
+  total: '',
+  pasarela: 'X',
+}
+
 export function usePedidosViewModel() {
-  // TODO(Ejercicio 3): mover aquí el estado y la lógica de OrdersApp.jsx
-  throw new Error('usePedidosViewModel() no implementado todavía')
+  const [pedidos, setPedidos] = useState([])
+  const [form, setForm] = useState(FORM_INICIAL)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const setField = (campo, valor) => {
+    setForm((prev) => ({ ...prev, [campo]: valor }))
+  }
+
+  const enviarPedido = async (e) => {
+    if (e?.preventDefault) e.preventDefault()
+    setError(null)
+    setLoading(true)
+
+    try {
+      const adapter = form.pasarela === 'X' ? new AdapterPasarelaX() : new AdapterPasarelaY()
+      const facade = new FachadaPedidos(adapter)
+
+      const pedido = {
+        cliente: form.cliente,
+        direccion: form.direccion,
+        items: form.itemsText.split(',').map((s) => s.trim()).filter(Boolean),
+        total: Number(form.total),
+      }
+
+      await facade.procesarPedido(pedido)
+
+      setPedidos((prev) => [
+        { ...pedido, pasarela: form.pasarela, procesadoEn: new Date().toLocaleTimeString() },
+        ...prev,
+      ])
+      setForm(FORM_INICIAL)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return {
+    pedidos,
+    loading,
+    error,
+    form,
+    setField,
+    enviarPedido,
+  }
 }

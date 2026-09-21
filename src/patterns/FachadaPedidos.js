@@ -1,39 +1,34 @@
 import { inventario } from '../services/inventario.js'
 import { envios } from '../services/envios.js'
-import { notificaciones } from '../services/notificaciones.js'
+import { retry } from './retry.js'
+import { CircuitBreaker } from './CircuitBreaker.js'
+import { eventBus } from './eventBus.js'
 
-/**
- * EJERCICIO 2 — Facade
- *
- * procesarPedido() debe orquestar, EN ORDEN, estas 4 operaciones:
- *   1. inventario.reservar(pedido.items)
- *   2. this.pago.procesar(pedido.total)      (el IPago inyectado)
- *   3. envios.programar(pedido.direccion)
- *   4. notificaciones.confirmar(pedido.cliente)
- *
- * Si el pago falla (resultado.exito === false), NO debe continuar con
- * envío ni notificación: debe lanzar un Error con un mensaje claro.
- *
- * Referencia: mismo patrón visto en clase, pero aquí "Pagos" es un
- * IPago ya adaptado (Ejercicio 1) en vez de un servicio directo — así
- * la Fachada no sabe (ni le importa) si por debajo está la Pasarela X
- * o la Y.
- */
+const inventarioBreaker = new CircuitBreaker({ umbralFallos: 3, tiempoEsperaMs: 5000 })
+
 export class FachadaPedidos {
-  constructor(pago) {
-    this.pago = pago // instancia de IPago: AdapterPasarelaX o AdapterPasarelaY
+  constructor(pago, breaker = inventarioBreaker) {
+    this.pago = pago
+    this.breaker = breaker
   }
 
   async procesarPedido(pedido) {
-    await inventario.reservar(pedido.items)
+    // 1. Reservar inventario protegido con Circuit Breaker + Retry
+    await this.breaker.ejecutar(() =>
+      retry(() => inventario.reservar(pedido.items), { intentos: 3, esperaMs: 300 })
+    )
 
+    // 2. Procesar el pago con el adaptador inyectado
     const pago = await this.pago.procesar(pedido.total)
     if (!pago.exito) {
       throw new Error('El pago fue rechazado. No se pudo completar el pedido.')
     }
 
+    // 3. Programar el despacho
     const envio = await envios.programar(pedido.direccion)
-    await notificaciones.confirmar(pedido.cliente)
+
+    // 4. Disparar evento asíncrono en lugar de llamar a notificaciones directamente
+    eventBus.emit('pedido:procesado', { ...pedido, pago, envio })
 
     return { pago, envio, completado: true }
   }
